@@ -1,6 +1,29 @@
 use reqwest::blocking::Client;
 use std::env;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
+
+#[derive(Debug)]
+enum FailureReason {
+    InvalidUrl,
+    Timeout,
+    Connection,
+    Other,
+}
+
+#[derive(Debug)]
+enum CheckOutcome {
+    Healthy { status_code: reqwest::StatusCode },
+    UnhealthyHttp { status_code: reqwest::StatusCode },
+    RequestFailed { reason: FailureReason },
+}
+
+#[derive(Debug)]
+struct CheckResult {
+    url: String,
+    checked_at: SystemTime,
+    latency: Duration,
+    outcome: CheckOutcome,
+}
 
 fn main() {
     if env::args().len() != 2 {
@@ -47,4 +70,45 @@ fn main() {
 fn check_url(client: &Client, url: &str) -> Result<reqwest::StatusCode, reqwest::Error> {
     let response = client.get(url).send()?;
     Ok(response.status())
+}
+
+fn classify_status(status_code: reqwest::StatusCode) -> CheckOutcome {
+    if status_code.is_success() {
+        CheckOutcome::Healthy { status_code }
+    } else {
+        CheckOutcome::UnhealthyHttp { status_code }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_classify_status_healthy_status() {
+        let status_code = reqwest::StatusCode::OK;
+
+        let outcome = classify_status(status_code);
+
+        assert!(matches!(
+            outcome,
+            CheckOutcome::Healthy {
+                status_code: reqwest::StatusCode::OK
+            }
+        ));
+    }
+
+    #[test]
+    fn test_classify_status_unhealthy_status() {
+        let status_code = reqwest::StatusCode::INTERNAL_SERVER_ERROR;
+
+        let outcome = classify_status(status_code);
+
+        assert!(matches!(
+            outcome,
+            CheckOutcome::UnhealthyHttp {
+                status_code: reqwest::StatusCode::INTERNAL_SERVER_ERROR
+            }
+        ));
+    }
 }
